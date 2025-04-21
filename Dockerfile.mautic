@@ -1,0 +1,28 @@
+# Dockerfile.mautic
+
+FROM mautic/mautic:5-apache
+
+USER root
+
+# Instala utilitários
+RUN apt-get update \
+  && apt-get install -y curl unzip \
+  && rm -rf /var/lib/apt/lists/*
+
+# Baixa PT‑BR sem clonar todo o repo
+RUN mkdir -p /var/www/html/translations/pt_BR \
+ && curl -fSL \
+     https://github.com/mautic/language-packs/raw/master/pt_BR.zip \
+     -o /tmp/pt_BR.zip \
+ && unzip /tmp/pt_BR.zip -d /var/www/html/translations/pt_BR \
+ && rm /tmp/pt_BR.zip
+
+# Copia entrypoint personalizado
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Define entrypoint e CMD
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["apache2-foreground"]
+
+USER www-data

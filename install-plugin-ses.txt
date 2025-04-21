@@ -1,0 +1,20 @@
+docker exec -it mautic-mautic-1 bash -lc '\
+  apt-get update \
+    && apt-get install -y --no-install-recommends git unzip curl \
+    && rm -rf /var/lib/apt/lists/* && \
+  mkdir -p /var/www/html/docroot/plugins && \
+  cd /var/www/html/docroot/plugins && \
+    rm -rf AmazonSesBundle && \
+    git clone https://github.com/pm-pmaas/etailors_amazon_ses.git AmazonSesBundle && \
+    chown -R www-data:www-data AmazonSesBundle && \
+  cd /var/www/html && \
+    curl -sS https://getcomposer.org/installer | php && \
+    mv composer.phar /usr/local/bin/composer && \
+    chmod +x /usr/local/bin/composer && \
+    composer require aws/aws-sdk-php --no-interaction --optimize-autoloader --no-scripts && \
+    composer dump-autoload --optimize && \
+    rm -rf /var/www/html/var/cache/prod && \
+    php bin/console mautic:plugins:reload --env=prod && \
+    php bin/console cache:clear --env=prod --no-warmup && \
+    php bin/console cache:warmup --env=prod \
+'
