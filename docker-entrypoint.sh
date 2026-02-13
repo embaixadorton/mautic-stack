@@ -50,29 +50,6 @@ until mysqladmin ping \
 done
 echo "✅ MySQL está pronto!"
 
-# 4) Aguardar Redis (agora com 60 tentativas)
-REDIS_HOST=${REDIS_HOST:-$MAUTIC_REDIS_HOST}
-REDIS_PORT=${REDIS_PORT:-$MAUTIC_REDIS_PORT}
-echo "[4/15] ⏳ Aguardando Redis em $REDIS_HOST:$REDIS_PORT..."
-max_attempts=60   # ⬅️ DOBRO DE PACIÊNCIA
-attempt=0
-redis_ok=false
-until redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping >/dev/null 2>&1; do
-  attempt=$((attempt + 1))
-  if [ $attempt -ge $max_attempts ]; then
-    echo "⚠️  Redis não respondeu após $max_attempts tentativas. Continuando sem Redis..."
-    break
-  fi
-  echo "   ⏳ Tentativa $attempt/$max_attempts..."
-  sleep 2
-done
-if [ $attempt -lt $max_attempts ]; then
-  redis_ok=true
-  echo "✅ Redis está pronto!"
-else
-  echo "⚠️  Redis não disponível, mas continuando..."
-fi
-
 # 5) Verificar se Composer está disponível
 echo "[5/15] 🔧 Verificando Composer..."
 if ! command -v composer &> /dev/null; then
