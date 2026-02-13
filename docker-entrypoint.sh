@@ -50,21 +50,28 @@ until mysqladmin ping \
 done
 echo "✅ MySQL está pronto!"
 
-# 4) Aguardar Redis (usa REDIS_HOST ou MAUTIC_REDIS_HOST como fallback)
+# 4) Aguardar Redis (agora com 60 tentativas)
 REDIS_HOST=${REDIS_HOST:-$MAUTIC_REDIS_HOST}
 REDIS_PORT=${REDIS_PORT:-$MAUTIC_REDIS_PORT}
 echo "[4/15] ⏳ Aguardando Redis em $REDIS_HOST:$REDIS_PORT..."
+max_attempts=60   # ⬅️ DOBRO DE PACIÊNCIA
 attempt=0
+redis_ok=false
 until redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping >/dev/null 2>&1; do
   attempt=$((attempt + 1))
   if [ $attempt -ge $max_attempts ]; then
-    echo "⚠️  Redis não respondeu, continuando mesmo assim..."
+    echo "⚠️  Redis não respondeu após $max_attempts tentativas. Continuando sem Redis..."
     break
   fi
   echo "   ⏳ Tentativa $attempt/$max_attempts..."
   sleep 2
 done
-echo "✅ Redis está pronto!"
+if [ $attempt -lt $max_attempts ]; then
+  redis_ok=true
+  echo "✅ Redis está pronto!"
+else
+  echo "⚠️  Redis não disponível, mas continuando..."
+fi
 
 # 5) Verificar se Composer está disponível
 echo "[5/15] 🔧 Verificando Composer..."
@@ -138,7 +145,7 @@ else
   echo "⚠️  Composer não disponível"
 fi
 
-# 9) Atualizar autoloader (sempre, pois novos plugins podem ter sido adicionados)
+# 9) Atualizar autoloader
 echo "[9/15] 🔄 Atualizando autoloader..."
 if command -v composer &> /dev/null; then
   composer dump-autoload --optimize --no-interaction 2>&1 | tail -3 || true
@@ -166,115 +173,62 @@ php bin/console cache:warmup --env=prod 2>&1 | tail -3 || true
 echo "✅ Cache aquecido"
 
 # ============================================================
-# 13) Configuração automática do Amazon SES (após instalação)
+# 13) Configuração automática do Amazon SES (SOMENTE VIA COMANDO)
 # ============================================================
 echo "[13/15] 📧 Configurando Amazon SES..."
 
-# Função para configurar via edição SEGURA do local.php
-configure_ses_via_file() {
-  local local_php="/var/www/html/config/local.php"
-  if [ ! -f "$local_php" ]; then
-    echo "   ⚠️ Arquivo local.php não encontrado. Não é possível configurar via arquivo."
-    return 1
-  fi
-
-  # Cria um backup
-  cp "$local_php" "$local_php.backup.$(date +%s)"
-
-  # Monta o DSN
-  local DSN="mautic+ses+api://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@default?region=${AWS_REGION}&ratelimit=14"
-  local FROM_EMAIL="${AWS_SES_FROM_EMAIL}"
-  local FROM_NAME="${AWS_SES_FROM_NAME:-Mautic}"
-
-  # Usa um script PHP mais robusto para mesclar configurações
-  php -r "
-    \$configFile = '$local_php';
-    // Carrega configuração existente
-    if (file_exists(\$configFile)) {
-        \$config = include \$configFile;
-        if (!is_array(\$config)) {
-            \$config = [];
-        }
-    } else {
-        \$config = [];
-    }
-
-    // Adiciona/sobrescreve as chaves do SES
-    \$config['mailer_dsn'] = '$DSN';
-    \$config['mailer_from_email'] = '$FROM_EMAIL';
-    \$config['mailer_from_name'] = '$FROM_NAME';
-
-    // Gera o código PHP corretamente
-    \$content = '<?php' . \"\\n\\n\";
-    \$content .= 'return ' . var_export(\$config, true) . ';' . \"\\n\";
-
-    // Escreve o arquivo
-    if (file_put_contents(\$configFile, \$content) !== false) {
-        echo '✅ Configurações SES salvas diretamente no local.php';
-        exit(0);
-    } else {
-        echo '⚠️ Falha ao escrever no local.php';
-        exit(1);
-    }
-  " 2>&1 && {
-    # Se o PHP retornou 0, sucesso
-    chown www-data:www-data "$local_php" 2>/dev/null || true
-    chmod 664 "$local_php" 2>/dev/null || true
-    return 0
-  } || {
-    echo "   ⚠️ Falha ao executar script PHP para configurar local.php"
-    # Restaura backup? Deixamos a critério do admin.
-    return 1
-  }
-}
-
 if [ -f /var/www/html/config/local.php ]; then
-  echo "   Mautic instalado, aplicando configurações do SES..."
+  echo "   ✅ Mautic instalado. Tentando configurar SES via comando..."
 
-  # 1) Garante que o plugin está ativo
-  php bin/console mautic:plugins:reload --env=prod > /dev/null 2>&1 && \
-    echo "   ✅ Plugins recarregados (AmazonSesBundle ativado)" || \
-    echo "   ⚠️ Falha ao recarregar plugins"
+  # Verifica se o comando mautic:config:set existe
+  if php bin/console list mautic:config:set --env=prod 2>&1 | grep -q "mautic:config:set"; then
 
-  # 2) Se as credenciais AWS estiverem definidas
-  if [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ] && [ -n "$AWS_REGION" ]; then
     # Monta o DSN
     DSN="mautic+ses+api://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@default?region=${AWS_REGION}&ratelimit=14"
 
-    # Tenta configurar via comando CLI (mautic:config:set)
-    if php bin/console list mautic:config:set --env=prod 2>&1 | grep -q "mautic:config:set"; then
-      echo "   Usando comando mautic:config:set..."
-      
-      # Configura DSN
-      if php bin/console mautic:config:set mailer_dsn "$DSN" --env=prod > /dev/null 2>&1; then
-        echo "   ✅ Transporte SES configurado (DSN via comando)"
-      else
-        echo "   ⚠️ Falha ao configurar transporte via comando"
-        configure_ses_via_file
-      fi
-      
-      # Configura e-mail from
-      if [ -n "$AWS_SES_FROM_EMAIL" ]; then
-        php bin/console mautic:config:set mailer_from_email "$AWS_SES_FROM_EMAIL" --env=prod > /dev/null 2>&1 && \
-          echo "   ✅ Email 'from' configurado (via comando)" || \
-          echo "   ⚠️ Falha ao configurar email 'from' via comando"
-        
-        php bin/console mautic:config:set mailer_from_name "${AWS_SES_FROM_NAME:-Mautic}" --env=prod > /dev/null 2>&1 && \
-          echo "   ✅ Nome 'from' configurado (via comando)" || \
-          echo "   ⚠️ Falha ao configurar nome 'from' via comando"
-      fi
+    # 1) Configurar mailer_dsn
+    echo "   🔧 Configurando mailer_dsn..."
+    OUTPUT=$(php bin/console mautic:config:set mailer_dsn "$DSN" --env=prod 2>&1)
+    if [ $? -eq 0 ]; then
+      echo "   ✅ Transporte SES configurado (DSN)"
     else
-      echo "   Comando mautic:config:set não disponível. Usando edição direta do local.php..."
-      configure_ses_via_file
+      echo "   ❌ Falha ao configurar transporte. Saída do comando:"
+      echo "   $OUTPUT" | sed 's/^/      /'
+    fi
+
+    # 2) Configurar mailer_from_email
+    if [ -n "$AWS_SES_FROM_EMAIL" ]; then
+      echo "   🔧 Configurando mailer_from_email..."
+      OUTPUT=$(php bin/console mautic:config:set mailer_from_email "$AWS_SES_FROM_EMAIL" --env=prod 2>&1)
+      if [ $? -eq 0 ]; then
+        echo "   ✅ Email 'from' configurado"
+      else
+        echo "   ❌ Falha ao configurar email 'from'. Saída:"
+        echo "   $OUTPUT" | sed 's/^/      /'
+      fi
+    fi
+
+    # 3) Configurar mailer_from_name
+    if [ -n "$AWS_SES_FROM_NAME" ]; then
+      echo "   🔧 Configurando mailer_from_name..."
+      OUTPUT=$(php bin/console mautic:config:set mailer_from_name "$AWS_SES_FROM_NAME" --env=prod 2>&1)
+      if [ $? -eq 0 ]; then
+        echo "   ✅ Nome 'from' configurado"
+      else
+        echo "   ❌ Falha ao configurar nome 'from'. Saída:"
+        echo "   $OUTPUT" | sed 's/^/      /'
+      fi
     fi
   else
-    echo "   ⏩ Credenciais AWS não definidas. Configuração SES ignorada."
+    echo "   ⚠️ Comando 'mautic:config:set' não está disponível. Configure o SES manualmente no painel."
   fi
 else
-  echo "   ⏩ Mautic não instalado. Configuração SES será aplicada após a instalação (próximo restart)."
+  echo "   ⏩ Mautic não instalado. A configuração do SES será feita após a instalação (próximo restart)."
 fi
 
+# ============================================================
 # 14) Corrigir permissões finais
+# ============================================================
 echo "[14/15] 🔐 Corrigindo permissões finais..."
 chown -R www-data:www-data /var/www/html 2>/dev/null || true
 chmod -R 755 /var/www/html 2>/dev/null || true
