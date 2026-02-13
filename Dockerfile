@@ -14,6 +14,10 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Copiar configuração personalizada do Apache (elimina aviso ServerName)
+COPY apache-server.conf /etc/apache2/conf-available/
+RUN a2enconf apache-server
+
 # Copiar entrypoint customizado
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
