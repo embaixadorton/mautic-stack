@@ -50,7 +50,9 @@ until mysqladmin ping \
 done
 echo "✅ MySQL está pronto!"
 
-# 4) Aguardar Redis
+# 4) Aguardar Redis (usa REDIS_HOST ou MAUTIC_REDIS_HOST como fallback)
+REDIS_HOST=${REDIS_HOST:-$MAUTIC_REDIS_HOST}
+REDIS_PORT=${REDIS_PORT:-$MAUTIC_REDIS_PORT}
 echo "[4/14] ⏳ Aguardando Redis em $REDIS_HOST:$REDIS_PORT..."
 attempt=0
 until redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping >/dev/null 2>&1; do
@@ -85,19 +87,18 @@ else
   echo "⚠️  Git não disponível"
 fi
 
-# 7) Clonar e instalar plugin Amazon SES
+# 7) Instalar plugin Amazon SES (somente se ainda não existir)
 echo "[7/14] 📥 Instalando plugin Amazon SES..."
 if [ ! -d "/var/www/html/docroot/plugins/AmazonSesBundle" ]; then
   echo "   Plugin não existe, instalando..."
+  cd /var/www/html/docroot/plugins
   if command -v git &> /dev/null; then
     echo "   Usando Git..."
-    cd /var/www/html/docroot/plugins
     git clone --depth 1 https://github.com/pm-pmaas/etailors_amazon_ses.git AmazonSesBundle 2>&1 | tail -5 || {
       echo "   ⚠️  Falha ao clonar plugin via git"
     }
   else
     echo "   Usando wget/curl..."
-    cd /var/www/html/docroot/plugins
     wget -q https://github.com/pm-pmaas/etailors_amazon_ses/archive/master.zip -O amazon-ses.zip 2>/dev/null || {
       curl -sS -L https://github.com/pm-pmaas/etailors_amazon_ses/archive/master.zip -o amazon-ses.zip 2>/dev/null || {
         echo "   ⚠️  Falha ao baixar plugin"
@@ -113,26 +114,31 @@ if [ ! -d "/var/www/html/docroot/plugins/AmazonSesBundle" ]; then
   chown -R www-data:www-data AmazonSesBundle 2>/dev/null || true
   echo "✅ Plugin instalado"
 else
-  echo "✅ Plugin já existe"
+  echo "✅ Plugin já existe, pulando instalação"
 fi
 
-# 8) Instalar dependências PHP
-echo "[8/14] ☁️ Instalando AWS SDK..."
+# 8) Instalar dependências PHP (AWS SDK) - apenas se não estiver presente
+echo "[8/14] ☁️ Verificando AWS SDK..."
 cd /var/www/html
 if command -v composer &> /dev/null; then
-  composer require aws/aws-sdk-php \
-    --no-interaction \
-    --optimize-autoloader \
-    --no-scripts \
-    --no-dev 2>&1 | grep -E "(Installing|Using)" | tail -10 || {
-    echo "   ⚠️  Erro ao instalar AWS SDK"
-  }
-  echo "✅ AWS SDK instalado"
+  if ! composer show aws/aws-sdk-php --quiet 2>/dev/null; then
+    echo "   Instalando AWS SDK..."
+    composer require aws/aws-sdk-php \
+      --no-interaction \
+      --optimize-autoloader \
+      --no-scripts \
+      --no-dev 2>&1 | grep -E "(Installing|Using)" | tail -10 || {
+      echo "   ⚠️  Erro ao instalar AWS SDK"
+    }
+    echo "✅ AWS SDK instalado"
+  else
+    echo "✅ AWS SDK já instalado, pulando"
+  fi
 else
   echo "⚠️  Composer não disponível"
 fi
 
-# 9) Atualizar autoloader
+# 9) Atualizar autoloader (sempre, pois novos plugins podem ter sido adicionados)
 echo "[9/14] 🔄 Atualizando autoloader..."
 if command -v composer &> /dev/null; then
   composer dump-autoload --optimize --no-interaction 2>&1 | tail -3 || true
