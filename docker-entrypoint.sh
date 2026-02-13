@@ -169,30 +169,74 @@ echo "✅ Cache aquecido"
 # 13) Configuração automática do Amazon SES (após instalação)
 # ============================================================
 echo "[13/15] 📧 Configurando Amazon SES..."
+
+# Função para configurar via edição direta do local.php
+configure_ses_via_file() {
+  local local_php="/var/www/html/config/local.php"
+  if [ ! -f "$local_php" ]; then
+    echo "   ⚠️ Arquivo local.php não encontrado. Não é possível configurar via arquivo."
+    return 1
+  fi
+
+  # Monta o DSN
+  local DSN="mautic+ses+api://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@default?region=${AWS_REGION}&ratelimit=14"
+  local FROM_EMAIL="${AWS_SES_FROM_EMAIL}"
+  local FROM_NAME="${AWS_SES_FROM_NAME:-Mautic}"
+
+  # Usa um script PHP inline para modificar o array de configuração
+  php -r "
+    \$configFile = '$local_php';
+    \$config = include \$configFile;
+    if (!is_array(\$config)) { \$config = []; }
+    \$config['mailer_dsn'] = '$DSN';
+    \$config['mailer_from_email'] = '$FROM_EMAIL';
+    \$config['mailer_from_name'] = '$FROM_NAME';
+    file_put_contents(\$configFile, '<?php return ' . var_export(\$config, true) . ';');
+  " 2>/dev/null && {
+    echo "   ✅ Configurações SES salvas diretamente no local.php"
+    return 0
+  } || {
+    echo "   ⚠️ Falha ao escrever no local.php"
+    return 1
+  }
+}
+
 if [ -f /var/www/html/config/local.php ]; then
-  # Se o Mautic já estiver instalado (local.php existe)
   echo "   Mautic instalado, aplicando configurações do SES..."
 
-  # Garante que o plugin está ativo (reload adicional por segurança)
+  # 1) Garante que o plugin está ativo
   php bin/console mautic:plugins:reload --env=prod > /dev/null 2>&1 && \
     echo "   ✅ Plugins recarregados (AmazonSesBundle ativado)" || \
     echo "   ⚠️ Falha ao recarregar plugins"
 
-  # Se as credenciais AWS estiverem definidas, configura o transporte de e-mail
+  # 2) Se as credenciais AWS estiverem definidas
   if [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ] && [ -n "$AWS_REGION" ]; then
-    # Monta o DSN para o SES
+    # Monta o DSN
     DSN="mautic+ses+api://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@default?region=${AWS_REGION}&ratelimit=14"
-    
-    # Define o transporte de e-mail
-    php bin/console mautic:emails:transport --mailer-dsn="$DSN" --env=prod > /dev/null 2>&1 && \
-      echo "   ✅ Transporte SES configurado (DSN)" || \
-      echo "   ⚠️ Falha ao configurar transporte"
 
-    # Configura o endereço "from" padrão
-    if [ -n "$AWS_SES_FROM_EMAIL" ]; then
-      php bin/console mautic:emails:from --from-email="$AWS_SES_FROM_EMAIL" --from-name="${AWS_SES_FROM_NAME:-Mautic}" --env=prod > /dev/null 2>&1 && \
-        echo "   ✅ Email 'from' configurado: $AWS_SES_FROM_EMAIL" || \
-        echo "   ⚠️ Falha ao configurar email 'from'"
+    # Tenta configurar via comando CLI (mautic:config:set)
+    CONFIG_SET_AVAILABLE=$(php bin/console list mautic:config:set --env=prod 2>&1 | grep -c "mautic:config:set" || true)
+    
+    if [ "$CONFIG_SET_AVAILABLE" -gt 0 ]; then
+      echo "   Usando comando mautic:config:set..."
+      # Configura DSN
+      php bin/console mautic:config:set mailer_dsn "$DSN" --env=prod > /dev/null 2>&1 && \
+        echo "   ✅ Transporte SES configurado (DSN via comando)" || \
+        { echo "   ⚠️ Falha ao configurar transporte via comando"; configure_ses_via_file; }
+      
+      # Configura e-mail from
+      if [ -n "$AWS_SES_FROM_EMAIL" ]; then
+        php bin/console mautic:config:set mailer_from_email "$AWS_SES_FROM_EMAIL" --env=prod > /dev/null 2>&1 && \
+          echo "   ✅ Email 'from' configurado (via comando)" || \
+          echo "   ⚠️ Falha ao configurar email 'from' via comando"
+        
+        php bin/console mautic:config:set mailer_from_name "${AWS_SES_FROM_NAME:-Mautic}" --env=prod > /dev/null 2>&1 && \
+          echo "   ✅ Nome 'from' configurado (via comando)" || \
+          echo "   ⚠️ Falha ao configurar nome 'from' via comando"
+      fi
+    else
+      echo "   Comando mautic:config:set não disponível. Usando edição direta do local.php..."
+      configure_ses_via_file
     fi
   else
     echo "   ⏩ Credenciais AWS não definidas. Configuração SES ignorada."
