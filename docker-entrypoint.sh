@@ -5,7 +5,7 @@ echo "🚀 Iniciando Mautic com setup automático..."
 echo "================================================"
 
 # 1) Criar diretórios necessários
-echo "[1/15] 📁 Criando diretórios..."
+echo "[1/13] 📁 Criando diretórios..."
 mkdir -p /var/www/html/config
 mkdir -p /var/www/html/var/cache
 mkdir -p /var/www/html/var/logs
@@ -16,7 +16,7 @@ mkdir -p /var/www/html/docroot/plugins
 echo "✅ Diretórios criados"
 
 # 2) Corrigir permissões
-echo "[2/15] 🔐 Corrigindo permissões..."
+echo "[2/13] 🔐 Corrigindo permissões..."
 chown -R www-data:www-data \
   /var/www/html/config \
   /var/www/html/var \
@@ -32,7 +32,7 @@ chmod -R 775 /var/www/html/media 2>/dev/null || true
 echo "✅ Permissões corrigidas"
 
 # 3) Aguardar MySQL
-echo "[3/15] ⏳ Aguardando MySQL em $MAUTIC_DB_HOST:$MAUTIC_DB_PORT..."
+echo "[3/13] ⏳ Aguardando MySQL em $MAUTIC_DB_HOST:$MAUTIC_DB_PORT..."
 max_attempts=30
 attempt=0
 until mysqladmin ping \
@@ -50,8 +50,8 @@ until mysqladmin ping \
 done
 echo "✅ MySQL está pronto!"
 
-# 5) Verificar se Composer está disponível
-echo "[5/15] 🔧 Verificando Composer..."
+# 4) Verificar se Composer está disponível
+echo "[4/13] 🔧 Verificando Composer..."
 if ! command -v composer &> /dev/null; then
   echo "   Instalando Composer..."
   curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer 2>/dev/null || {
@@ -62,8 +62,8 @@ fi
 composer --version
 echo "✅ Composer OK"
 
-# 6) Verificar se Git está disponível
-echo "[6/15] 🔍 Verificando Git..."
+# 5) Verificar se Git está disponível
+echo "[5/13] 🔍 Verificando Git..."
 if command -v git &> /dev/null; then
   git --version
   echo "✅ Git disponível"
@@ -71,8 +71,8 @@ else
   echo "⚠️  Git não disponível"
 fi
 
-# 7) Instalar plugin Amazon SES (somente se ainda não existir)
-echo "[7/15] 📥 Instalando plugin Amazon SES..."
+# 6) Instalar plugin Amazon SES (somente se ainda não existir)
+echo "[6/13] 📥 Instalando plugin Amazon SES..."
 if [ ! -d "/var/www/html/docroot/plugins/AmazonSesBundle" ]; then
   echo "   Plugin não existe, instalando..."
   cd /var/www/html/docroot/plugins
@@ -101,8 +101,8 @@ else
   echo "✅ Plugin já existe, pulando instalação"
 fi
 
-# 8) Instalar dependências PHP (AWS SDK) - apenas se não estiver presente
-echo "[8/15] ☁️ Verificando AWS SDK..."
+# 7) Instalar dependências PHP (AWS SDK) - apenas se não estiver presente
+echo "[7/13] ☁️ Verificando AWS SDK..."
 cd /var/www/html
 if command -v composer &> /dev/null; then
   if ! composer show aws/aws-sdk-php --quiet 2>/dev/null; then
@@ -122,91 +122,37 @@ else
   echo "⚠️  Composer não disponível"
 fi
 
-# 9) Atualizar autoloader
-echo "[9/15] 🔄 Atualizando autoloader..."
+# 8) Atualizar autoloader
+echo "[8/13] 🔄 Atualizando autoloader..."
 if command -v composer &> /dev/null; then
   composer dump-autoload --optimize --no-interaction 2>&1 | tail -3 || true
   echo "✅ Autoloader atualizado"
 fi
 
-# 10) Limpar cache
-echo "[10/15] 🧹 Limpando cache..."
+# 9) Limpar cache
+echo "[9/13] 🧹 Limpando cache..."
 rm -rf /var/www/html/var/cache/prod 2>/dev/null || true
 rm -rf /var/www/html/var/cache/dev 2>/dev/null || true
 echo "✅ Cache limpo"
 
-# 11) Recarregar plugins (ativa o AmazonSesBundle)
-echo "[11/15] 🔌 Recarregando plugins..."
+# 10) Recarregar plugins (ativa o AmazonSesBundle)
+echo "[10/13] 🔌 Recarregando plugins..."
 cd /var/www/html
 php bin/console mautic:plugins:reload --env=prod 2>&1 | tail -5 || {
   echo "⚠️  Erro ao recarregar plugins"
 }
 echo "✅ Plugins recarregados"
 
-# 12) Limpar cache novamente e aquecer
-echo "[12/15] 🧹 Limpando cache (2ª vez)..."
+# 11) Limpar cache novamente e aquecer
+echo "[11/13] 🧹 Limpando cache (2ª vez)..."
 php bin/console cache:clear --env=prod --no-warmup 2>&1 | tail -3 || true
 php bin/console cache:warmup --env=prod 2>&1 | tail -3 || true
 echo "✅ Cache aquecido"
 
 # ============================================================
-# 13) Configuração automática do Amazon SES (SOMENTE VIA COMANDO)
+# 12) Corrigir permissões finais
 # ============================================================
-echo "[13/15] 📧 Configurando Amazon SES..."
-
-if [ -f /var/www/html/config/local.php ]; then
-  echo "   ✅ Mautic instalado. Tentando configurar SES via comando..."
-
-  # Verifica se o comando mautic:config:set existe
-  if php bin/console list mautic:config:set --env=prod 2>&1 | grep -q "mautic:config:set"; then
-
-    # Monta o DSN
-    DSN="mautic+ses+api://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@default?region=${AWS_REGION}&ratelimit=14"
-
-    # 1) Configurar mailer_dsn
-    echo "   🔧 Configurando mailer_dsn..."
-    OUTPUT=$(php bin/console mautic:config:set mailer_dsn "$DSN" --env=prod 2>&1)
-    if [ $? -eq 0 ]; then
-      echo "   ✅ Transporte SES configurado (DSN)"
-    else
-      echo "   ❌ Falha ao configurar transporte. Saída do comando:"
-      echo "   $OUTPUT" | sed 's/^/      /'
-    fi
-
-    # 2) Configurar mailer_from_email
-    if [ -n "$AWS_SES_FROM_EMAIL" ]; then
-      echo "   🔧 Configurando mailer_from_email..."
-      OUTPUT=$(php bin/console mautic:config:set mailer_from_email "$AWS_SES_FROM_EMAIL" --env=prod 2>&1)
-      if [ $? -eq 0 ]; then
-        echo "   ✅ Email 'from' configurado"
-      else
-        echo "   ❌ Falha ao configurar email 'from'. Saída:"
-        echo "   $OUTPUT" | sed 's/^/      /'
-      fi
-    fi
-
-    # 3) Configurar mailer_from_name
-    if [ -n "$AWS_SES_FROM_NAME" ]; then
-      echo "   🔧 Configurando mailer_from_name..."
-      OUTPUT=$(php bin/console mautic:config:set mailer_from_name "$AWS_SES_FROM_NAME" --env=prod 2>&1)
-      if [ $? -eq 0 ]; then
-        echo "   ✅ Nome 'from' configurado"
-      else
-        echo "   ❌ Falha ao configurar nome 'from'. Saída:"
-        echo "   $OUTPUT" | sed 's/^/      /'
-      fi
-    fi
-  else
-    echo "   ⚠️ Comando 'mautic:config:set' não está disponível. Configure o SES manualmente no painel."
-  fi
-else
-  echo "   ⏩ Mautic não instalado. A configuração do SES será feita após a instalação (próximo restart)."
-fi
-
-# ============================================================
-# 14) Corrigir permissões finais
-# ============================================================
-echo "[14/15] 🔐 Corrigindo permissões finais..."
+echo "[12/13] 🔐 Corrigindo permissões finais..."
 chown -R www-data:www-data /var/www/html 2>/dev/null || true
 chmod -R 755 /var/www/html 2>/dev/null || true
 chmod -R 775 /var/www/html/var 2>/dev/null || true
@@ -215,8 +161,8 @@ chmod -R 775 /var/www/html/media 2>/dev/null || true
 echo "✅ Permissões finalizadas"
 
 echo "================================================"
-echo "[15/15] ✅ Setup completo! Iniciando Apache..."
+echo "[13/13] ✅ Setup completo! Iniciando Apache..."
 echo "================================================"
 
-# 15) Iniciar Apache
+# 13) Iniciar Apache
 exec docker-php-entrypoint apache2-foreground
