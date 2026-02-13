@@ -112,7 +112,7 @@ services:
       - "traefik.docker.network=mautic"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/"]
-      start_period: 120s
+      start_period: 180s
       interval: 30s
       timeout: 10s
       retries: 3
