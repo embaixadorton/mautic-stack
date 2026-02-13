@@ -83,9 +83,10 @@ services:
       - mautic-logs:/var/www/html/var/logs
       - mautic-cache:/var/www/html/var/cache
       - mautic-plugins:/var/www/html/docroot/plugins
-      # COMPARTILHAR VENDOR COM O CRON
+      # Volume compartilhado para vendor (AWS SDK e dependências)
       - vendor-data:/var/www/html/vendor
     environment:
+      # Banco de dados
       MAUTIC_DB_HOST: ${MAUTIC_DB_HOST}
       MAUTIC_DB_PORT: ${MAUTIC_DB_PORT}
       MAUTIC_DB_USER: ${MAUTIC_DB_USER}
@@ -93,22 +94,36 @@ services:
       MAUTIC_DB_NAME: ${MAUTIC_DB_NAME}
       DATABASE_DRIVER: ${DATABASE_DRIVER}
       DATABASE_CHARSET: ${DATABASE_CHARSET}
+
+      # PHP
       PHP_MEMORY_LIMIT: ${PHP_MEMORY_LIMIT}
       PHP_MAX_UPLOAD: ${PHP_MAX_UPLOAD}
       PHP_MAX_EXECUTION_TIME: ${PHP_MAX_EXECUTION_TIME}
       PHP_INI_DATE_TIMEZONE: ${PHP_INI_DATE_TIMEZONE}
-      # SUPRIMIR DEPRECAÇÕES DO PHP 8.2
+      # Suprime deprecações do PHP 8.2
       PHP_INI_ERROR_REPORTING: "E_ALL & ~E_DEPRECATED"
+
+      # Cache/Redis
       MAUTIC_CACHING_BACKEND: ${MAUTIC_CACHING_BACKEND}
       MAUTIC_REDIS_HOST: ${REDIS_HOST}
       MAUTIC_REDIS_PORT: ${REDIS_PORT}
-      # ADICIONADO PARA O ENTRYPOINT CONSEGUIR TESTAR O REDIS
+      # Para o entrypoint conseguir testar o Redis
       REDIS_HOST: ${REDIS_HOST}
       REDIS_PORT: ${REDIS_PORT}
+
+      # Mautic
       DOCKER_MAUTIC_RUN_MIGRATIONS: ${DOCKER_MAUTIC_RUN_MIGRATIONS}
       DOCKER_MAUTIC_LOAD_TEST_DATA: ${DOCKER_MAUTIC_LOAD_TEST_DATA}
       DOCTRINE_MIGRATIONS_NAMESPACE: Mautic\\Migrations
       MAUTIC_URL: https://${TRAEFIK_DOMAIN}
+
+      # 🔐 Credenciais AWS para Amazon SES
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      AWS_SES_FROM_EMAIL: ${AWS_SES_FROM_EMAIL}
+      AWS_SES_FROM_NAME: "${AWS_SES_FROM_NAME}"
+
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.mautic.rule=Host(`${TRAEFIK_DOMAIN}`)"
@@ -149,7 +164,7 @@ services:
       - mautic-logs:/var/www/html/var/logs
       - mautic-cache:/var/www/html/var/cache
       - mautic-plugins:/var/www/html/docroot/plugins
-      # COMPARTILHAR O MESMO VENDOR DO MAUTIC PRINCIPAL
+      # Mesmo volume vendor compartilhado
       - vendor-data:/var/www/html/vendor
     environment:
       MAUTIC_DB_HOST: ${MAUTIC_DB_HOST}
@@ -161,9 +176,16 @@ services:
       MAUTIC_CACHING_BACKEND: ${MAUTIC_CACHING_BACKEND}
       MAUTIC_REDIS_HOST: ${REDIS_HOST}
       MAUTIC_REDIS_PORT: ${REDIS_PORT}
-      # TAMBÉM ÚTIL PARA O CRON
       REDIS_HOST: ${REDIS_HOST}
       REDIS_PORT: ${REDIS_PORT}
+
+      # 🔐 Credenciais AWS também para o cron (comandos de email)
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      AWS_SES_FROM_EMAIL: ${AWS_SES_FROM_EMAIL}
+      AWS_SES_FROM_NAME: "${AWS_SES_FROM_NAME}"
+
     entrypoint: /bin/bash
     command:
       - -c
@@ -202,7 +224,7 @@ volumes:
     driver: local
   mautic-plugins:
     driver: local
-  # NOVO VOLUME PARA O DIRETÓRIO VENDOR
+  # Volume para o diretório vendor (AWS SDK, etc.)
   vendor-data:
     driver: local
 
