@@ -1,0 +1,23 @@
+.env
+.env.local
+.env.*.local
+
+# Volumes docker
+mysql-data/
+redis-data/
+
+# Mautic cache e temp
+mautic/config/local.php
+mautic/logs/*
+!mautic/logs/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Docker
+.dockerignore
