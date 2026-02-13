@@ -170,7 +170,7 @@ echo "✅ Cache aquecido"
 # ============================================================
 echo "[13/15] 📧 Configurando Amazon SES..."
 
-# Função para configurar via edição direta do local.php
+# Função para configurar via edição SEGURA do local.php
 configure_ses_via_file() {
   local local_php="/var/www/html/config/local.php"
   if [ ! -f "$local_php" ]; then
@@ -178,25 +178,52 @@ configure_ses_via_file() {
     return 1
   fi
 
+  # Cria um backup
+  cp "$local_php" "$local_php.backup.$(date +%s)"
+
   # Monta o DSN
   local DSN="mautic+ses+api://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@default?region=${AWS_REGION}&ratelimit=14"
   local FROM_EMAIL="${AWS_SES_FROM_EMAIL}"
   local FROM_NAME="${AWS_SES_FROM_NAME:-Mautic}"
 
-  # Usa um script PHP inline para modificar o array de configuração
+  # Usa um script PHP mais robusto para mesclar configurações
   php -r "
     \$configFile = '$local_php';
-    \$config = include \$configFile;
-    if (!is_array(\$config)) { \$config = []; }
+    // Carrega configuração existente
+    if (file_exists(\$configFile)) {
+        \$config = include \$configFile;
+        if (!is_array(\$config)) {
+            \$config = [];
+        }
+    } else {
+        \$config = [];
+    }
+
+    // Adiciona/sobrescreve as chaves do SES
     \$config['mailer_dsn'] = '$DSN';
     \$config['mailer_from_email'] = '$FROM_EMAIL';
     \$config['mailer_from_name'] = '$FROM_NAME';
-    file_put_contents(\$configFile, '<?php return ' . var_export(\$config, true) . ';');
-  " 2>/dev/null && {
-    echo "   ✅ Configurações SES salvas diretamente no local.php"
+
+    // Gera o código PHP corretamente
+    \$content = '<?php' . \"\\n\\n\";
+    \$content .= 'return ' . var_export(\$config, true) . ';' . \"\\n\";
+
+    // Escreve o arquivo
+    if (file_put_contents(\$configFile, \$content) !== false) {
+        echo '✅ Configurações SES salvas diretamente no local.php';
+        exit(0);
+    } else {
+        echo '⚠️ Falha ao escrever no local.php';
+        exit(1);
+    }
+  " 2>&1 && {
+    # Se o PHP retornou 0, sucesso
+    chown www-data:www-data "$local_php" 2>/dev/null || true
+    chmod 664 "$local_php" 2>/dev/null || true
     return 0
   } || {
-    echo "   ⚠️ Falha ao escrever no local.php"
+    echo "   ⚠️ Falha ao executar script PHP para configurar local.php"
+    # Restaura backup? Deixamos a critério do admin.
     return 1
   }
 }
@@ -215,14 +242,16 @@ if [ -f /var/www/html/config/local.php ]; then
     DSN="mautic+ses+api://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@default?region=${AWS_REGION}&ratelimit=14"
 
     # Tenta configurar via comando CLI (mautic:config:set)
-    CONFIG_SET_AVAILABLE=$(php bin/console list mautic:config:set --env=prod 2>&1 | grep -c "mautic:config:set" || true)
-    
-    if [ "$CONFIG_SET_AVAILABLE" -gt 0 ]; then
+    if php bin/console list mautic:config:set --env=prod 2>&1 | grep -q "mautic:config:set"; then
       echo "   Usando comando mautic:config:set..."
+      
       # Configura DSN
-      php bin/console mautic:config:set mailer_dsn "$DSN" --env=prod > /dev/null 2>&1 && \
-        echo "   ✅ Transporte SES configurado (DSN via comando)" || \
-        { echo "   ⚠️ Falha ao configurar transporte via comando"; configure_ses_via_file; }
+      if php bin/console mautic:config:set mailer_dsn "$DSN" --env=prod > /dev/null 2>&1; then
+        echo "   ✅ Transporte SES configurado (DSN via comando)"
+      else
+        echo "   ⚠️ Falha ao configurar transporte via comando"
+        configure_ses_via_file
+      fi
       
       # Configura e-mail from
       if [ -n "$AWS_SES_FROM_EMAIL" ]; then
