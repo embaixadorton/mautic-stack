@@ -1,0 +1,196 @@
+version: '3.8'
+
+services:
+  mautic-db:
+    image: mysql:8.0
+    container_name: mautic-mautic-db-1
+    restart: unless-stopped
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --max_connections=100
+      - --wait_timeout=600
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MAUTIC_DB_NAME}
+      MYSQL_USER: ${MAUTIC_DB_USER}
+      MYSQL_PASSWORD: ${MAUTIC_DB_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      start_period: 20s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mautic
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  redis:
+    image: redis:7-alpine
+    container_name: mautic-redis-1
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --maxmemory
+      - "128mb"
+      - --maxmemory-policy
+      - allkeys-lru
+      - --appendonly
+      - "no"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      start_period: 10s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mautic
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  mautic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mautic-mautic-1
+    restart: unless-stopped
+    depends_on:
+      mautic-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - mautic-media:/var/www/html/media
+      - mautic-config:/var/www/html/config
+      - mautic-logs:/var/www/html/var/logs
+      - mautic-cache:/var/www/html/var/cache
+      - mautic-plugins:/var/www/html/docroot/plugins
+    environment:
+      MAUTIC_DB_HOST: ${MAUTIC_DB_HOST}
+      MAUTIC_DB_PORT: ${MAUTIC_DB_PORT}
+      MAUTIC_DB_USER: ${MAUTIC_DB_USER}
+      MAUTIC_DB_PASSWORD: ${MAUTIC_DB_PASSWORD}
+      MAUTIC_DB_NAME: ${MAUTIC_DB_NAME}
+      DATABASE_DRIVER: ${DATABASE_DRIVER}
+      DATABASE_CHARSET: ${DATABASE_CHARSET}
+      PHP_MEMORY_LIMIT: ${PHP_MEMORY_LIMIT}
+      PHP_MAX_UPLOAD: ${PHP_MAX_UPLOAD}
+      PHP_MAX_EXECUTION_TIME: ${PHP_MAX_EXECUTION_TIME}
+      PHP_INI_DATE_TIMEZONE: ${PHP_INI_DATE_TIMEZONE}
+      MAUTIC_CACHING_BACKEND: ${MAUTIC_CACHING_BACKEND}
+      MAUTIC_REDIS_HOST: ${REDIS_HOST}
+      MAUTIC_REDIS_PORT: ${REDIS_PORT}
+      DOCKER_MAUTIC_RUN_MIGRATIONS: ${DOCKER_MAUTIC_RUN_MIGRATIONS}
+      DOCKER_MAUTIC_LOAD_TEST_DATA: ${DOCKER_MAUTIC_LOAD_TEST_DATA}
+      DOCTRINE_MIGRATIONS_NAMESPACE: Mautic\\Migrations
+      MAUTIC_URL: https://${TRAEFIK_DOMAIN}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mautic.rule=Host(`${TRAEFIK_DOMAIN}`)"
+      - "traefik.http.routers.mautic.entrypoints=websecure"
+      - "traefik.http.routers.mautic.tls.certresolver=leresolver"
+      - "traefik.http.routers.mautic.service=mautic-service"
+      - "traefik.http.services.mautic-service.loadbalancer.server.port=80"
+      - "traefik.docker.network=mautic"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      start_period: 120s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - mautic
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '1'
+          memory: 512M
+
+  mautic-cron:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mautic-mautic-cron-1
+    restart: unless-stopped
+    depends_on:
+      mautic:
+        condition: service_started
+    volumes:
+      - mautic-media:/var/www/html/media
+      - mautic-config:/var/www/html/config
+      - mautic-logs:/var/www/html/var/logs
+      - mautic-cache:/var/www/html/var/cache
+      - mautic-plugins:/var/www/html/docroot/plugins
+    environment:
+      MAUTIC_DB_HOST: ${MAUTIC_DB_HOST}
+      MAUTIC_DB_PORT: ${MAUTIC_DB_PORT}
+      MAUTIC_DB_USER: ${MAUTIC_DB_USER}
+      MAUTIC_DB_PASSWORD: ${MAUTIC_DB_PASSWORD}
+      MAUTIC_DB_NAME: ${MAUTIC_DB_NAME}
+      DOCKER_MAUTIC_ROLE: mautic_cron
+      MAUTIC_CACHING_BACKEND: ${MAUTIC_CACHING_BACKEND}
+      MAUTIC_REDIS_HOST: ${REDIS_HOST}
+      MAUTIC_REDIS_PORT: ${REDIS_PORT}
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        sleep 30
+        while true; do
+          php /var/www/html/bin/console mautic:segments:update --batch-limit=300 2>/dev/null || true
+          php /var/www/html/bin/console mautic:campaigns:rebuild 2>/dev/null || true
+          php /var/www/html/bin/console mautic:campaigns:trigger 2>/dev/null || true
+          php /var/www/html/bin/console mautic:email:process 2>/dev/null || true
+          sleep 60
+        done
+    networks:
+      - mautic
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+volumes:
+  mysql-data:
+    driver: local
+  redis-data:
+    driver: local
+  mautic-media:
+    driver: local
+  mautic-config:
+    driver: local
+  mautic-logs:
+    driver: local
+  mautic-cache:
+    driver: local
+  mautic-plugins:
+    driver: local
+
+networks:
+  mautic:
+    external: true
