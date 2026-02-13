@@ -51,45 +51,37 @@ done
 echo "✅ MySQL está pronto!"
 
 # ============================================================
-# 4) Pré-configurar banco de dados (antes da instalação web)
+# 4) Criar configuração do banco de dados (local.php) se não existir
 # ============================================================
 echo "[4/14] ⚙️ Pré-configurando banco de dados..."
 
-# Só executa se o arquivo local.php NÃO existir (primeira execução)
 if [ ! -f /var/www/html/config/local.php ]; then
-  echo "   Arquivo local.php não encontrado. Criando configuração inicial..."
+  echo "   Arquivo local.php não encontrado. Criando com as configurações do .env..."
+  
+  # Escapa caracteres especiais na senha (se houver)
+  DB_PASSWORD_ESCAPED=$(printf '%s' "$MAUTIC_DB_PASSWORD" | sed 's/[\/&]/\\&/g')
 
-  # Verifica se o comando mautic:config:set existe
-  if php bin/console list mautic:config:set --env=prod 2>&1 | grep -q "mautic:config:set"; then
-    # Configura host
-    php bin/console mautic:config:set db_host "$MAUTIC_DB_HOST" --env=prod > /dev/null 2>&1 && \
-      echo "   ✅ db_host configurado: $MAUTIC_DB_HOST" || \
-      echo "   ⚠️ Falha ao configurar db_host"
+  cat > /var/www/html/config/local.php <<EOF
+<?php
+\$parameters = array(
+    'db_driver' => '${DATABASE_DRIVER:-pdo_mysql}',
+    'db_host' => '$MAUTIC_DB_HOST',
+    'db_port' => '$MAUTIC_DB_PORT',
+    'db_name' => '$MAUTIC_DB_NAME',
+    'db_user' => '$MAUTIC_DB_USER',
+    'db_password' => '$MAUTIC_DB_PASSWORD',
+    'db_table_prefix' => null,
+    'db_backup_tables' => true,
+    'db_backup_prefix' => 'bak_',
+);
+EOF
 
-    # Configura porta
-    php bin/console mautic:config:set db_port "$MAUTIC_DB_PORT" --env=prod > /dev/null 2>&1 && \
-      echo "   ✅ db_port configurado: $MAUTIC_DB_PORT" || \
-      echo "   ⚠️ Falha ao configurar db_port"
+  # Ajusta permissão
+  chown www-data:www-data /var/www/html/config/local.php
+  chmod 664 /var/www/html/config/local.php
 
-    # Configura nome do banco
-    php bin/console mautic:config:set db_name "$MAUTIC_DB_NAME" --env=prod > /dev/null 2>&1 && \
-      echo "   ✅ db_name configurado: $MAUTIC_DB_NAME" || \
-      echo "   ⚠️ Falha ao configurar db_name"
-
-    # Configura usuário
-    php bin/console mautic:config:set db_user "$MAUTIC_DB_USER" --env=prod > /dev/null 2>&1 && \
-      echo "   ✅ db_user configurado" || \
-      echo "   ⚠️ Falha ao configurar db_user"
-
-    # Configura senha
-    php bin/console mautic:config:set db_password "$MAUTIC_DB_PASSWORD" --env=prod > /dev/null 2>&1 && \
-      echo "   ✅ db_password configurado" || \
-      echo "   ⚠️ Falha ao configurar db_password"
-
-    echo "   ✅ Configurações de banco salvas em local.php"
-  else
-    echo "   ⚠️ Comando 'mautic:config:set' não disponível. Ignorando pré-configuração."
-  fi
+  echo "   ✅ local.php criado com sucesso."
+  echo "   Host: $MAUTIC_DB_HOST, Banco: $MAUTIC_DB_NAME, Usuário: $MAUTIC_DB_USER"
 else
   echo "   ⏩ local.php já existe. Configuração de banco ignorada."
 fi
