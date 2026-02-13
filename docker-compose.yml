@@ -83,6 +83,8 @@ services:
       - mautic-logs:/var/www/html/var/logs
       - mautic-cache:/var/www/html/var/cache
       - mautic-plugins:/var/www/html/docroot/plugins
+      # COMPARTILHAR VENDOR COM O CRON
+      - vendor-data:/var/www/html/vendor
     environment:
       MAUTIC_DB_HOST: ${MAUTIC_DB_HOST}
       MAUTIC_DB_PORT: ${MAUTIC_DB_PORT}
@@ -95,9 +97,14 @@ services:
       PHP_MAX_UPLOAD: ${PHP_MAX_UPLOAD}
       PHP_MAX_EXECUTION_TIME: ${PHP_MAX_EXECUTION_TIME}
       PHP_INI_DATE_TIMEZONE: ${PHP_INI_DATE_TIMEZONE}
+      # SUPRIMIR DEPRECAÇÕES DO PHP 8.2
+      PHP_INI_ERROR_REPORTING: "E_ALL & ~E_DEPRECATED"
       MAUTIC_CACHING_BACKEND: ${MAUTIC_CACHING_BACKEND}
       MAUTIC_REDIS_HOST: ${REDIS_HOST}
       MAUTIC_REDIS_PORT: ${REDIS_PORT}
+      # ADICIONADO PARA O ENTRYPOINT CONSEGUIR TESTAR O REDIS
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
       DOCKER_MAUTIC_RUN_MIGRATIONS: ${DOCKER_MAUTIC_RUN_MIGRATIONS}
       DOCKER_MAUTIC_LOAD_TEST_DATA: ${DOCKER_MAUTIC_LOAD_TEST_DATA}
       DOCTRINE_MIGRATIONS_NAMESPACE: Mautic\\Migrations
@@ -142,6 +149,8 @@ services:
       - mautic-logs:/var/www/html/var/logs
       - mautic-cache:/var/www/html/var/cache
       - mautic-plugins:/var/www/html/docroot/plugins
+      # COMPARTILHAR O MESMO VENDOR DO MAUTIC PRINCIPAL
+      - vendor-data:/var/www/html/vendor
     environment:
       MAUTIC_DB_HOST: ${MAUTIC_DB_HOST}
       MAUTIC_DB_PORT: ${MAUTIC_DB_PORT}
@@ -152,6 +161,9 @@ services:
       MAUTIC_CACHING_BACKEND: ${MAUTIC_CACHING_BACKEND}
       MAUTIC_REDIS_HOST: ${REDIS_HOST}
       MAUTIC_REDIS_PORT: ${REDIS_PORT}
+      # TAMBÉM ÚTIL PARA O CRON
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
     entrypoint: /bin/bash
     command:
       - -c
@@ -189,6 +201,9 @@ volumes:
   mautic-cache:
     driver: local
   mautic-plugins:
+    driver: local
+  # NOVO VOLUME PARA O DIRETÓRIO VENDOR
+  vendor-data:
     driver: local
 
 networks:
