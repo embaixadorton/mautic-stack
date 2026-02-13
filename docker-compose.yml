@@ -26,14 +26,6 @@ services:
       retries: 5
     networks:
       - mautic
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 512M
-        reservations:
-          cpus: '0.5'
-          memory: 256M
 
   redis:
     image: redis:7-alpine
@@ -41,6 +33,7 @@ services:
     restart: unless-stopped
     command:
       - redis-server
+      - --bind 0.0.0.0
       - --maxmemory
       - "128mb"
       - --maxmemory-policy
@@ -51,20 +44,12 @@ services:
       - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      start_period: 45s           # ⬅️ MAIS TEMPO PARA INICIAR
+      start_period: 30s
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 5
     networks:
       - mautic
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 256M
-        reservations:
-          cpus: '0.25'
-          memory: 128M
 
   mautic:
     build:
@@ -107,13 +92,6 @@ services:
       DOCTRINE_MIGRATIONS_NAMESPACE: Mautic\\Migrations
       MAUTIC_URL: https://${TRAEFIK_DOMAIN}
 
-      # 🔐 Credenciais AWS
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-      AWS_REGION: ${AWS_REGION}
-      AWS_SES_FROM_EMAIL: ${AWS_SES_FROM_EMAIL}
-      AWS_SES_FROM_NAME: "${AWS_SES_FROM_NAME}"
-
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.mautic.rule=Host(`${TRAEFIK_DOMAIN}`)"
@@ -130,14 +108,6 @@ services:
       retries: 3
     networks:
       - mautic
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 1G
-        reservations:
-          cpus: '1'
-          memory: 512M
 
   mautic-cron:
     build:
@@ -167,11 +137,6 @@ services:
       MAUTIC_REDIS_PORT: ${REDIS_PORT}
       REDIS_HOST: ${REDIS_HOST}
       REDIS_PORT: ${REDIS_PORT}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-      AWS_REGION: ${AWS_REGION}
-      AWS_SES_FROM_EMAIL: ${AWS_SES_FROM_EMAIL}
-      AWS_SES_FROM_NAME: "${AWS_SES_FROM_NAME}"
     entrypoint: /bin/bash
     command:
       - -c
@@ -186,32 +151,16 @@ services:
         done
     networks:
       - mautic
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 512M
-        reservations:
-          cpus: '0.5'
-          memory: 256M
 
 volumes:
   mysql-data:
-    driver: local
   redis-data:
-    driver: local
   mautic-media:
-    driver: local
   mautic-config:
-    driver: local
   mautic-logs:
-    driver: local
   mautic-cache:
-    driver: local
   mautic-plugins:
-    driver: local
   vendor-data:
-    driver: local
 
 networks:
   mautic:
