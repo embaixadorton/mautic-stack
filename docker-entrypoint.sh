@@ -5,7 +5,7 @@ echo "🚀 Iniciando Mautic com setup automático..."
 echo "================================================"
 
 # 1) Criar diretórios necessários
-echo "[1/14] 📁 Criando diretórios..."
+echo "[1/15] 📁 Criando diretórios..."
 mkdir -p /var/www/html/config
 mkdir -p /var/www/html/var/cache
 mkdir -p /var/www/html/var/logs
@@ -16,7 +16,7 @@ mkdir -p /var/www/html/docroot/plugins
 echo "✅ Diretórios criados"
 
 # 2) Corrigir permissões
-echo "[2/14] 🔐 Corrigindo permissões..."
+echo "[2/15] 🔐 Corrigindo permissões..."
 chown -R www-data:www-data \
   /var/www/html/config \
   /var/www/html/var \
@@ -32,7 +32,7 @@ chmod -R 775 /var/www/html/media 2>/dev/null || true
 echo "✅ Permissões corrigidas"
 
 # 3) Aguardar MySQL
-echo "[3/14] ⏳ Aguardando MySQL em $MAUTIC_DB_HOST:$MAUTIC_DB_PORT..."
+echo "[3/15] ⏳ Aguardando MySQL em $MAUTIC_DB_HOST:$MAUTIC_DB_PORT..."
 max_attempts=30
 attempt=0
 until mysqladmin ping \
@@ -53,7 +53,7 @@ echo "✅ MySQL está pronto!"
 # 4) Aguardar Redis (usa REDIS_HOST ou MAUTIC_REDIS_HOST como fallback)
 REDIS_HOST=${REDIS_HOST:-$MAUTIC_REDIS_HOST}
 REDIS_PORT=${REDIS_PORT:-$MAUTIC_REDIS_PORT}
-echo "[4/14] ⏳ Aguardando Redis em $REDIS_HOST:$REDIS_PORT..."
+echo "[4/15] ⏳ Aguardando Redis em $REDIS_HOST:$REDIS_PORT..."
 attempt=0
 until redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping >/dev/null 2>&1; do
   attempt=$((attempt + 1))
@@ -67,7 +67,7 @@ done
 echo "✅ Redis está pronto!"
 
 # 5) Verificar se Composer está disponível
-echo "[5/14] 🔧 Verificando Composer..."
+echo "[5/15] 🔧 Verificando Composer..."
 if ! command -v composer &> /dev/null; then
   echo "   Instalando Composer..."
   curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer 2>/dev/null || {
@@ -79,7 +79,7 @@ composer --version
 echo "✅ Composer OK"
 
 # 6) Verificar se Git está disponível
-echo "[6/14] 🔍 Verificando Git..."
+echo "[6/15] 🔍 Verificando Git..."
 if command -v git &> /dev/null; then
   git --version
   echo "✅ Git disponível"
@@ -88,7 +88,7 @@ else
 fi
 
 # 7) Instalar plugin Amazon SES (somente se ainda não existir)
-echo "[7/14] 📥 Instalando plugin Amazon SES..."
+echo "[7/15] 📥 Instalando plugin Amazon SES..."
 if [ ! -d "/var/www/html/docroot/plugins/AmazonSesBundle" ]; then
   echo "   Plugin não existe, instalando..."
   cd /var/www/html/docroot/plugins
@@ -118,7 +118,7 @@ else
 fi
 
 # 8) Instalar dependências PHP (AWS SDK) - apenas se não estiver presente
-echo "[8/14] ☁️ Verificando AWS SDK..."
+echo "[8/15] ☁️ Verificando AWS SDK..."
 cd /var/www/html
 if command -v composer &> /dev/null; then
   if ! composer show aws/aws-sdk-php --quiet 2>/dev/null; then
@@ -139,34 +139,70 @@ else
 fi
 
 # 9) Atualizar autoloader (sempre, pois novos plugins podem ter sido adicionados)
-echo "[9/14] 🔄 Atualizando autoloader..."
+echo "[9/15] 🔄 Atualizando autoloader..."
 if command -v composer &> /dev/null; then
   composer dump-autoload --optimize --no-interaction 2>&1 | tail -3 || true
   echo "✅ Autoloader atualizado"
 fi
 
 # 10) Limpar cache
-echo "[10/14] 🧹 Limpando cache..."
+echo "[10/15] 🧹 Limpando cache..."
 rm -rf /var/www/html/var/cache/prod 2>/dev/null || true
 rm -rf /var/www/html/var/cache/dev 2>/dev/null || true
 echo "✅ Cache limpo"
 
-# 11) Recarregar plugins
-echo "[11/14] 🔌 Recarregando plugins..."
+# 11) Recarregar plugins (ativa o AmazonSesBundle)
+echo "[11/15] 🔌 Recarregando plugins..."
 cd /var/www/html
 php bin/console mautic:plugins:reload --env=prod 2>&1 | tail -5 || {
   echo "⚠️  Erro ao recarregar plugins"
 }
 echo "✅ Plugins recarregados"
 
-# 12) Limpar cache novamente
-echo "[12/14] 🧹 Limpando cache (2ª vez)..."
+# 12) Limpar cache novamente e aquecer
+echo "[12/15] 🧹 Limpando cache (2ª vez)..."
 php bin/console cache:clear --env=prod --no-warmup 2>&1 | tail -3 || true
 php bin/console cache:warmup --env=prod 2>&1 | tail -3 || true
 echo "✅ Cache aquecido"
 
-# 13) Corrigir permissões finais
-echo "[13/14] 🔐 Corrigindo permissões finais..."
+# ============================================================
+# 13) Configuração automática do Amazon SES (após instalação)
+# ============================================================
+echo "[13/15] 📧 Configurando Amazon SES..."
+if [ -f /var/www/html/config/local.php ]; then
+  # Se o Mautic já estiver instalado (local.php existe)
+  echo "   Mautic instalado, aplicando configurações do SES..."
+
+  # Garante que o plugin está ativo (reload adicional por segurança)
+  php bin/console mautic:plugins:reload --env=prod > /dev/null 2>&1 && \
+    echo "   ✅ Plugins recarregados (AmazonSesBundle ativado)" || \
+    echo "   ⚠️ Falha ao recarregar plugins"
+
+  # Se as credenciais AWS estiverem definidas, configura o transporte de e-mail
+  if [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ] && [ -n "$AWS_REGION" ]; then
+    # Monta o DSN para o SES
+    DSN="mautic+ses+api://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@default?region=${AWS_REGION}&ratelimit=14"
+    
+    # Define o transporte de e-mail
+    php bin/console mautic:emails:transport --mailer-dsn="$DSN" --env=prod > /dev/null 2>&1 && \
+      echo "   ✅ Transporte SES configurado (DSN)" || \
+      echo "   ⚠️ Falha ao configurar transporte"
+
+    # Configura o endereço "from" padrão
+    if [ -n "$AWS_SES_FROM_EMAIL" ]; then
+      php bin/console mautic:emails:from --from-email="$AWS_SES_FROM_EMAIL" --from-name="${AWS_SES_FROM_NAME:-Mautic}" --env=prod > /dev/null 2>&1 && \
+        echo "   ✅ Email 'from' configurado: $AWS_SES_FROM_EMAIL" || \
+        echo "   ⚠️ Falha ao configurar email 'from'"
+    fi
+  else
+    echo "   ⏩ Credenciais AWS não definidas. Configuração SES ignorada."
+  fi
+else
+  echo "   ⏩ Mautic não instalado. Configuração SES será aplicada após a instalação (próximo restart)."
+fi
+
+# 14) Corrigir permissões finais
+echo "[14/15] 🔐 Corrigindo permissões finais..."
 chown -R www-data:www-data /var/www/html 2>/dev/null || true
 chmod -R 755 /var/www/html 2>/dev/null || true
 chmod -R 775 /var/www/html/var 2>/dev/null || true
@@ -175,8 +211,8 @@ chmod -R 775 /var/www/html/media 2>/dev/null || true
 echo "✅ Permissões finalizadas"
 
 echo "================================================"
-echo "[14/14] ✅ Setup completo! Iniciando Apache..."
+echo "[15/15] ✅ Setup completo! Iniciando Apache..."
 echo "================================================"
 
-# 14) Iniciar Apache
+# 15) Iniciar Apache
 exec docker-php-entrypoint apache2-foreground
