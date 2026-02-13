@@ -51,10 +51,10 @@ services:
       - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      start_period: 30s          # ⬅️ AUMENTADO para dar tempo de iniciar
+      start_period: 45s           # ⬅️ MAIS TEMPO PARA INICIAR
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
     networks:
       - mautic
     deploy:
@@ -76,7 +76,7 @@ services:
       mautic-db:
         condition: service_healthy
       redis:
-        condition: service_started   # ⬅️ ALTERADO de service_healthy para service_started
+        condition: service_started
     volumes:
       - mautic-media:/var/www/html/media
       - mautic-config:/var/www/html/config
